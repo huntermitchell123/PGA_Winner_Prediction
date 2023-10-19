@@ -1,52 +1,4 @@
-"""
-API: https://developer.sportradar.com/docs/read/golf/Golf_v3#golf-api-overview
-
-High-level approach:
-1. Define variables including which players we're predicting, which tournament is next, and how far back to use training data for.
-2. Define helper functions
-3. Ensure we have most recent season stats data and player info
-4. Get all player historical tournaments data, historical season stats data, and relevant course info data. Write all to disk if necessary.
-5. Combine data of all relevant stats from player and course with the total difference to par this person ended up shooting.
-6. Clean up data, categorize some columns, scale others
-7. Train model
-8. Make prediction with current stats from players and info for next tournament
-
-
-
-Important Notes:
-- I chose to predict the players final scores relative to par, instead of their finishing position. This is because their finishing position is dependent upon
-    how others perform in the tournament. I could have also predicted total strokes, but that is dependent upon what par is
-- Right now I'm predicting how a player will perform in a tournament. We could instead predict how a player will perform in a given round. This would allow us to use
-    tournament weather and conditions on a day-to-day basis better.
-- The API only has data aggregated by season. This poses two problems with training/prediction:
-    1. During training, the model will be using data after the tournament it's training on. For example, when training on the Masters tournament (which occurs in May),
-        it should ideally only be using player data up to May, but will actually be using data from the entire season including after May.
-    2. When predicting, we will be using the player data from the current season. For tournaments that are early in the season, this will be minimal data.
-        It may be better to use previous season player data for first few tournaments until we have enough data.
-- The https://datagolf.com/raw-data-archive API has much more granular strokes gained data. This is paid subscription and requires scratch plus ($30/month)
-
-
-
-Data:
-- Tournament Schedule -- {URL}/tournaments/schedule -- https://developer.sportradar.com/docs/read/golf/Golf_v3#tournament-schedule:
-        High level tournament data for specific season. Includes course details. Sample data in "temp/tournaments_schedule_2023.csv"
-
-- Tournament Leaderboard -- {URL}/tournaments/{TOURNAMENT_ID}/leaderboard -- https://developer.sportradar.com/docs/read/golf/Golf_v3#tournament-leaderboard:
-        Full leaderboard data of specific tournament. Sample data in "temp/zozo_leaderboard_2023.csv"
-    
-- Tournament Summary -- {URL}/tournaments/{TOURNAMENT_ID}/summary -- https://developer.sportradar.com/docs/read/golf/Golf_v3#tournament-summary:
-        High level tournament info. "venue" has par and course length. "rounds" has weather and conditions of each round.
-    
-- Player Statistics -- {URL}/players/statistics -- https://developer.sportradar.com/docs/read/golf/Golf_v3#player-statistics:
-        Season statistics for all golfers. Sample data in "temp/player_stats_2023.csv". IMPORTANT: this only is accurate for v2 of API, NOT v3
-    
-- Player Profile -- {URL}/players/{player_id}/profile -- https://developer.sportradar.com/docs/read/golf/Golf_v3#player-profile:
-        Contains "previous_tournaments" and "statistics" of specific player for all previous seasons. Sample data in "temp/jt_player_previous_tournaments.csv" and 
-        "temp/jt_player_statistics.csv"
-
-- Course Difficulty -- Downloaded manually - https://datagolf.com/course-table?sort_cat=sg_difficulty&sort=app_sg&diff=hardest:
-        Had to manually change a lot of course names to match what's available in the sportradar API
-"""
+#!/usr/bin/env python3
 
 import requests
 from datetime import datetime
@@ -82,12 +34,12 @@ NEW_REQUEST_PREVIOUS_TOURNAMENTS = False
 SEED = 2015
 SIMULATIONS = 5
 
-FEATURES = ['course_difficulty', 'drive_avg', 'drive_acc', 'gir_pct', 'putt_avg','strokes_gained', 'scrambling_pct', 'scoring_avg',
-    'strokes_gained_tee_green', 'strokes_gained_total', 'yardage/par', 'avg_temp', 'avg_wind_speed', 'cloudy', 'sunny', 'rainy']
+FEATURES = ['course_difficulty', 'gir_pct', 'putt_avg', 'scoring_avg', 'yardage/par*drive_avg', 'drive_acc*scrambling_pct',
+    'strokes_gained_tee_green', 'strokes_gained_total', 'avg_temp', 'avg_wind_speed', 'rainy', 'sunny', 'cloudy']
 LABELS = ['score']
 TEST_SIZE = 0.1
 
-FEATURES_TO_NOT_SCALE = ['cloudy','sunny','rainy']
+FEATURES_TO_NOT_SCALE = ['rainy','sunny','cloudy']
 FEATURES_TO_SCALE = [col for col in FEATURES if col not in FEATURES_TO_NOT_SCALE]
 
 STATISTICS_FEATURES = ['drive_avg','drive_acc','gir_pct','putt_avg','strokes_gained','scrambling_pct','scoring_avg','strokes_gained_tee_green','strokes_gained_total']
@@ -295,6 +247,9 @@ def engineer_features(training_df):
 
     training_df['conditions_mapped'] = training_df['conditions'].apply(lambda conditions: [condition_mapping(condition.lower()) for condition in conditions])
 
+    training_df['yardage/par*drive_avg'] = training_df['yardage/par'] * training_df['drive_avg']
+    training_df['drive_acc*scrambling_pct'] = training_df['drive_acc'] * training_df['scrambling_pct']
+
     # fill course_difficulty null values with column mean
     training_df['course_difficulty'] = training_df['course_difficulty'].fillna(0.0)
 
@@ -341,7 +296,8 @@ def get_next_tournament_course_difficulty(course_difficulty_df, course):
 def generate_pred_df(season_stats_df, next_tournament_course_info, next_tournament_course_difficulty, next_tournament_condition_info):
     df = season_stats_df[season_stats_df['year']==CURRENT_YEAR]
     df['course_difficulty'] = next_tournament_course_difficulty
-    df['yardage/par'] = next_tournament_course_info['yardage']/next_tournament_course_info['yardage']
+    df['yardage/par*drive_avg'] = next_tournament_course_info['yardage'] / next_tournament_course_info['par'] * df['drive_avg']
+    df['drive_acc*scrambling_pct'] = df['drive_acc'] * df['scrambling_pct']
     for i in next_tournament_condition_info.items():
         df[i[0]] = i[1]
 
@@ -416,27 +372,27 @@ def main():
         pd.DataFrame(pred_df[FEATURES_TO_NOT_SCALE], index=pred_df.index, columns=FEATURES_TO_NOT_SCALE)],
         axis=1)
 
-    models = {}
     final_preds_dfs = []
+    # for some reason this for loop is using the same model over again?
     for i in range(SIMULATIONS):
         # Training
-        models[i] = XGBRegressor(random_state=SEED+i, objective='reg:squarederror')
-        models[i].fit(x_train_scaled,y_train)
-        get_score(models[i], x_train_scaled, y_train)
+        model = XGBRegressor(random_state=SEED+i, objective='reg:squarederror')
+        model.fit(x_train_scaled,y_train)
+        get_score(model, x_train_scaled, y_train)
 
         # Testing
-        preds = np.array(models[i].predict(x_test_scaled))
+        preds = np.array(model.predict(x_test_scaled))
         print(f'Model Predicted Scores vs Actual Scores for Players Previous Tournaments:')
         for a,b in zip(preds[:30], y_test.values[:30]):
             print(f'Predicted Score: {int(a)}, Actual Score: {int(*b,)}')
         get_results(preds, y_test)
         print('Feature Importances:')
-        sorted_idx = np.argsort(models[i].feature_importances_)[::-1]
+        sorted_idx = np.argsort(model.feature_importances_)[::-1]
         for index in sorted_idx:
-            print([x_train_scaled.columns[index], models[i].feature_importances_[index]]) 
+            print([x_train_scaled.columns[index], model.feature_importances_[index]])
 
         # Predict
-        final_preds = np.array(models[i].predict(final_pred_df))
+        final_preds = np.array(model.predict(final_pred_df))
         final_preds_dfs.append(pd.DataFrame({'full_name': pred_df['full_name'].values, 'projected_score': final_preds}))
 
     final_preds_df = pd.concat(final_preds_dfs)
