@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.svm import SVR
 from xgboost import XGBRegressor
 
 
@@ -32,7 +34,6 @@ NEW_REQUEST_TOURNAMENT_SCHEDULE = False
 NEW_REQUEST_PREVIOUS_TOURNAMENTS = False
 
 SEED = 2015
-SIMULATIONS = 5
 
 FEATURES = ['course_difficulty', 'gir_pct', 'putt_avg', 'scoring_avg', 'yardage/par*drive_avg', 'drive_acc*scrambling_pct',
     'strokes_gained_tee_green', 'strokes_gained_total', 'avg_temp', 'avg_wind_speed', 'rainy', 'sunny', 'cloudy']
@@ -372,32 +373,66 @@ def main():
         pd.DataFrame(pred_df[FEATURES_TO_NOT_SCALE], index=pred_df.index, columns=FEATURES_TO_NOT_SCALE)],
         axis=1)
 
-    final_preds_dfs = []
-    # for some reason this for loop is using the same model over again?
-    for i in range(SIMULATIONS):
-        # Training
-        model = XGBRegressor(random_state=SEED+i, objective='reg:squarederror')
-        model.fit(x_train_scaled,y_train)
-        get_score(model, x_train_scaled, y_train)
+    # Training
+    print('Training XGBoost model...')
+    xgboost_model = XGBRegressor(random_state=SEED, objective='reg:squarederror')
+    xgboost_model.fit(x_train_scaled,y_train)
+    get_score(xgboost_model, x_train_scaled, y_train)
+    print('XGBoost Feature Importances:')
+    sorted_idx = np.argsort(xgboost_model.feature_importances_)[::-1]
+    for index in sorted_idx:
+        print([x_train_scaled.columns[index], xgboost_model.feature_importances_[index]])
+    print('Training Linear Regression model...')
+    linreg_model = LinearRegression()
+    linreg_model.fit(x_train_scaled,y_train)
+    get_score(linreg_model, x_train_scaled, y_train)
+    print('Training Ridge Regression model...')
+    ridge_model = Ridge(random_state=SEED)
+    ridge_model.fit(x_train_scaled,y_train)
+    get_score(ridge_model, x_train_scaled, y_train)
+    print('Training Lasso Regression model...')
+    lasso_model = Lasso(random_state=SEED)
+    lasso_model.fit(x_train_scaled,y_train)
+    get_score(lasso_model, x_train_scaled, y_train)
+    print('Training Support Vector Regression model...')
+    svr_model = SVR()
+    svr_model.fit(x_train_scaled,y_train)
+    get_score(svr_model, x_train_scaled, y_train)
 
-        # Testing
-        preds = np.array(model.predict(x_test_scaled))
-        print(f'Model Predicted Scores vs Actual Scores for Players Previous Tournaments:')
-        for a,b in zip(preds[:30], y_test.values[:30]):
-            print(f'Predicted Score: {int(a)}, Actual Score: {int(*b,)}')
-        get_results(preds, y_test)
-        print('Feature Importances:')
-        sorted_idx = np.argsort(model.feature_importances_)[::-1]
-        for index in sorted_idx:
-            print([x_train_scaled.columns[index], model.feature_importances_[index]])
+    # Testing
+    xgboost_preds = np.array(xgboost_model.predict(x_test_scaled))
+    linreg_preds = np.array(linreg_model.predict(x_test_scaled))
+    ridge_preds = np.array(ridge_model.predict(x_test_scaled))
+    lasso_preds = np.array(lasso_model.predict(x_test_scaled))
+    svr_preds = np.array(svr_model.predict(x_test_scaled))
+    print('XGBoost results on test set:')
+    get_results(xgboost_preds, y_test)
+    print('Linear Regression results on test set:')
+    get_results(linreg_preds, y_test)
+    print('Ridge Regression results on test set:')
+    get_results(ridge_preds, y_test)
+    print('Lasso Regression results on test set:')
+    get_results(lasso_preds, y_test)
+    print('Support Vector Regression results on test set:')
+    get_results(svr_preds, y_test)
+    ensemble_preds = np.mean([xgboost_preds, linreg_preds.ravel(), ridge_preds.ravel(), lasso_preds, svr_preds], axis=0)
+    print('Full ensemble results on test set:')
+    get_results(ensemble_preds, y_test)
 
-        # Predict
-        final_preds = np.array(model.predict(final_pred_df))
-        final_preds_dfs.append(pd.DataFrame({'full_name': pred_df['full_name'].values, 'projected_score': final_preds}))
+    print(f'Model Predicted Scores vs Actual Scores for Players Previous Tournaments:')
+    for a,b in zip(ensemble_preds[:20], y_test.values[:20]):
+        print(f'Predicted Score: {int(a)}, Actual Score: {int(*b,)}')
 
-    final_preds_df = pd.concat(final_preds_dfs)
+    # Predict
+    final_xgboost_preds = np.array(xgboost_model.predict(final_pred_df))
+    final_linreg_preds = np.array(linreg_model.predict(final_pred_df))
+    final_ridge_preds = np.array(ridge_model.predict(final_pred_df))
+    final_lasso_preds = np.array(lasso_model.predict(final_pred_df))
+    final_svr_preds = np.array(svr_model.predict(final_pred_df))
+    final_ensemble_preds = np.mean([final_xgboost_preds, final_linreg_preds.ravel(), final_ridge_preds.ravel(), final_lasso_preds, final_svr_preds], axis=0)
+
     print(f'Final predictions for next tournament:\n')
-    print(final_preds_df.groupby('full_name').mean().sort_values(by='projected_score'))
+    print(pd.DataFrame({'full_name': pred_df['full_name'].values, 'projected_score': final_ensemble_preds}).sort_values(by='projected_score'))
 
 
 if __name__=="__main__":
