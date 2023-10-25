@@ -35,6 +35,7 @@ Important Notes:
     feature combinations I decided to keep were "yardage/par*drive_avg" which is intended to represent a player's distance relative to the course distance, and
     "drive_acc*scrambling_pct" which is intended to represent a player's ability to make par after bad drives. These were both fairly correlated to score. For models,
     I grid searched each one, but it only helped XGBoost. The final ensemble contains the grid-searched XGBoost, and the other original models.
+- The "v1" folder is old code when I tried to do this last year. It uses an older API with inaccurate data, and I didn't put as much effort into that model.
 
 
 Data:
