@@ -25,7 +25,9 @@ Important Notes:
     2. When predicting, we will be using the player data from the current season. For tournaments that are early in the season, this will be minimal data.
         It may be better to use previous season player data for first few tournaments until we have enough data.
     The only way to avoid this data leakage is to use very old data for each player, or use a paid API to get more granular data (see next bullet).
-- The https://datagolf.com/raw-data-archive API has much more granular strokes gained data. This is paid subscription and requires scratch plus ($30/month)
+- The https://datagolf.com/raw-data-archive API has much more granular strokes gained data. This is paid subscription and requires scratch plus ($30/month). This
+    should get rid of data leakage and make the model better by including player data from the past few months, instead of the entire season. I'm hoping to experiment
+    with this API at some point.
 - I tried incorporating more player-specific features such as past performance on harder courses, windier conditions, and rain. However, I didn't find a good way to 
     meaningfully calculate this, since their scores in these conditions had so many other factors attributing to them, which ended up being very noisy. The code to
     calculate these features is still in the notebook.
