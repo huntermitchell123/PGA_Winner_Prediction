@@ -15,6 +15,8 @@ High-level approach:
 
 
 Important Notes:
+- Full executable Python file is located at v2/PGA_Winner_Prediction.py. It will predict scores of all players defined at the top of the file for the next PGA golf
+    tournament. Update this list to contain who is playing. The app grabs relevant historical data for each player and writes it to disk. If you already have this data written from a previous run, you can set the "NEW_REQUEST" variables to False. You will need to have your own API key in an env var for this to run. You will also need to research the predicted weather for the next tournament and update those variables.
 - I chose to predict the players final scores relative to par, instead of their finishing position. This is because their finishing position is dependent upon
     how others perform in the tournament. I could have also predicted total strokes, but that is dependent upon what par is
 - Right now I'm predicting how a player will perform in a tournament. We could instead predict how a player will perform in a given round. This would allow us to use
