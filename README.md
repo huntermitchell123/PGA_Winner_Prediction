@@ -24,10 +24,15 @@ Important Notes:
         it should ideally only be using player data up to May, but will actually be using data from the entire season including after May.
     2. When predicting, we will be using the player data from the current season. For tournaments that are early in the season, this will be minimal data.
         It may be better to use previous season player data for first few tournaments until we have enough data.
+    The only way to avoid this data leakage is to use very old data for each player, or use a paid API to get more granular data (see next bullet).
 - The https://datagolf.com/raw-data-archive API has much more granular strokes gained data. This is paid subscription and requires scratch plus ($30/month)
 - I tried incorporating more player-specific features such as past performance on harder courses, windier conditions, and rain. However, I didn't find a good way to 
     meaningfully calculate this, since their scores in these conditions had so many other factors attributing to them, which ended up being very noisy. The code to
     calculate these features is still in the notebook.
+- I experimented with many features, feature combinations, and models. There were several features I decided to remove since they didn't make much of a difference. The
+    feature combinations I decided to keep were "yardage/par*drive_avg" which is intended to represent a player's distance relative to the course distance, and
+    "drive_acc*scrambling_pct" which is intended to represent a player's ability to make par after bad drives. These were both fairly correlated to score. For models,
+    I grid searched each one, but it only helped XGBoost. The final ensemble contains the grid-searched XGBoost, and the other original models.
 
 
 Data:

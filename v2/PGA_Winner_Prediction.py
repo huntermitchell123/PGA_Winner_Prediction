@@ -6,6 +6,8 @@ import time
 import json
 import os
 import ast
+import warnings
+warnings.filterwarnings("ignore")
 
 import pandas as pd
 import numpy as np
@@ -15,6 +17,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
 from sklearn.svm import SVR
+from sklearn.model_selection import GridSearchCV
 from xgboost import XGBRegressor
 
 
@@ -277,15 +280,24 @@ def plot(x_label, y_label, df):
     plt.ylabel(y_label)
 
 def get_score(model, x_train_scaled, y_train):
-  cv_score = cross_val_score(model, x_train_scaled, y_train, scoring = "neg_mean_squared_error", cv = 8)
-  rmse = np.sqrt(-cv_score)
+  cv_score = cross_val_score(model, x_train_scaled, y_train, scoring="neg_root_mean_squared_error", cv = 8)
+  rmse = -cv_score
+  avg_rmse = round(np.mean(rmse), 5)
+  std_dev_rmse = round(rmse.std(), 5)
   print('Cross-Validation Root Mean Squared Error:', rmse)
-  print('Average Root Mean Squared Error:', round(np.mean(rmse), 5))
-  print('Standard deviation:', round(rmse.std(), 5))
+  print('Average Root Mean Squared Error:', avg_rmse)
+  print('Standard deviation:', std_dev_rmse)
+  return [avg_rmse, std_dev_rmse]
 
 def get_results(preds, y_test):
-  score = np.sqrt(mean_squared_error(preds,y_test.values))
-  print(f"Final RMSE: {round(score,5)}")
+  score = round(np.sqrt(mean_squared_error(preds,y_test.values)),5)
+  print(f"Final RMSE: {score}")
+  return score
+
+def grid_search(model,params, x_train, y_train):
+  search = GridSearchCV(model, params, cv=5, scoring='neg_root_mean_squared_error')
+  search.fit(x_train,y_train)
+  return search.best_estimator_
 
 def get_next_tournament_course_difficulty(course_difficulty_df, course):
     try:
@@ -350,7 +362,7 @@ def main():
     # Split Data
     features_df = training_df[FEATURES]
     labels_df = training_df[LABELS]
-    x_train, x_test, y_train, y_test = train_test_split(features_df, labels_df, test_size=TEST_SIZE)
+    x_train, x_test, y_train, y_test = train_test_split(features_df, labels_df, test_size=TEST_SIZE, random_state=SEED)
 
     # Preprocessing
     scaler = StandardScaler()
@@ -374,30 +386,64 @@ def main():
         axis=1)
 
     # Training
+    model_scores = {}
+
     print('Training XGBoost model...')
     xgboost_model = XGBRegressor(random_state=SEED, objective='reg:squarederror')
     xgboost_model.fit(x_train_scaled,y_train)
-    get_score(xgboost_model, x_train_scaled, y_train)
+    model_scores['xgboost'] = get_score(xgboost_model, x_train_scaled, y_train)
+    xgboost_param_grid = {
+        "n_estimators": [100, 200, 300],
+        "learning_rate": [0.01, 0.05, 0.1],
+        "max_depth": [5,6,7]
+    }
+    xgboost_model_grid = grid_search(xgboost_model, xgboost_param_grid, x_train_scaled, y_train)
+    model_scores['xgboost_grid_search'] = get_score(xgboost_model_grid, x_train_scaled, y_train)
     print('XGBoost Feature Importances:')
-    sorted_idx = np.argsort(xgboost_model.feature_importances_)[::-1]
+    sorted_idx = np.argsort(xgboost_model_grid.feature_importances_)[::-1]
     for index in sorted_idx:
-        print([x_train_scaled.columns[index], xgboost_model.feature_importances_[index]])
+        print([x_train_scaled.columns[index], xgboost_model_grid.feature_importances_[index]])
+
     print('Training Linear Regression model...')
     linreg_model = LinearRegression()
     linreg_model.fit(x_train_scaled,y_train)
-    get_score(linreg_model, x_train_scaled, y_train)
+    model_scores['linear_regression'] = get_score(linreg_model, x_train_scaled, y_train)
+
     print('Training Ridge Regression model...')
     ridge_model = Ridge(random_state=SEED)
     ridge_model.fit(x_train_scaled,y_train)
-    get_score(ridge_model, x_train_scaled, y_train)
+    model_scores['ridge_regression'] = get_score(ridge_model, x_train_scaled, y_train)
+    ridge_param_grid = {
+            "alpha": [0.01, 0.1, 1.0, 10.0]
+    }
+    ridge_model_grid = grid_search(ridge_model, ridge_param_grid, x_train_scaled, y_train)
+    model_scores['ridge_regression_grid_search'] = get_score(ridge_model_grid, x_train_scaled, y_train)
+
     print('Training Lasso Regression model...')
     lasso_model = Lasso(random_state=SEED)
     lasso_model.fit(x_train_scaled,y_train)
-    get_score(lasso_model, x_train_scaled, y_train)
+    model_scores['lasso_regression'] = get_score(lasso_model, x_train_scaled, y_train)
+    lasso_param_grid = {
+            "alpha": [0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
+            "fit_intercept": [True, False], 
+            "normalize": [True, False],
+            "tol": [0.0005,.0001,0.00005]
+    }
+    lasso_model_grid = grid_search(lasso_model, lasso_param_grid, x_train_scaled, y_train)
+    model_scores['lasso_regression_grid_search'] = get_score(lasso_model_grid, x_train_scaled, y_train)
+
     print('Training Support Vector Regression model...')
     svr_model = SVR()
     svr_model.fit(x_train_scaled,y_train)
-    get_score(svr_model, x_train_scaled, y_train)
+    model_scores['support_vector_regressor'] = get_score(svr_model, x_train_scaled, y_train)
+    svr_param_grid = {
+            "C": [0.01, 0.1, 1.0, 10.0],
+            "kernel": ["linear", "poly", "rbf"],
+            "tol": [0.015, 0.01],
+            "epsilon": [0.2, 0.15]
+    }
+    svr_model_grid = grid_search(svr_model, svr_param_grid, x_train_scaled, y_train)
+    model_scores['support_vector_regressor_grid_search'] = get_score(svr_model_grid, x_train_scaled, y_train)
 
     # Testing
     xgboost_preds = np.array(xgboost_model.predict(x_test_scaled))
@@ -405,18 +451,25 @@ def main():
     ridge_preds = np.array(ridge_model.predict(x_test_scaled))
     lasso_preds = np.array(lasso_model.predict(x_test_scaled))
     svr_preds = np.array(svr_model.predict(x_test_scaled))
-    print('XGBoost results on test set:')
-    get_results(xgboost_preds, y_test)
-    print('Linear Regression results on test set:')
-    get_results(linreg_preds, y_test)
-    print('Ridge Regression results on test set:')
-    get_results(ridge_preds, y_test)
-    print('Lasso Regression results on test set:')
-    get_results(lasso_preds, y_test)
-    print('Support Vector Regression results on test set:')
-    get_results(svr_preds, y_test)
-    ensemble_preds = np.mean([xgboost_preds, linreg_preds.ravel(), ridge_preds.ravel(), lasso_preds, svr_preds], axis=0)
-    print('Full ensemble results on test set:')
+    xgboost_grid_preds = np.array(xgboost_model_grid.predict(x_test_scaled))
+    ridge_grid_preds = np.array(ridge_model_grid.predict(x_test_scaled))
+    lasso_grid_preds = np.array(lasso_model_grid.predict(x_test_scaled))
+    svr_grid_preds = np.array(svr_model_grid.predict(x_test_scaled))
+
+    model_scores['xgboost'].append(get_results(xgboost_preds, y_test))
+    model_scores['xgboost_grid_search'].append(get_results(xgboost_grid_preds, y_test))
+    model_scores['linear_regression'].append(get_results(linreg_preds, y_test))
+    model_scores['ridge_regression'].append(get_results(ridge_preds, y_test))
+    model_scores['ridge_regression_grid_search'].append(get_results(ridge_grid_preds, y_test))
+    model_scores['lasso_regression'].append(get_results(lasso_preds, y_test))
+    model_scores['lasso_regression_grid_search'].append(get_results(lasso_grid_preds, y_test))
+    model_scores['support_vector_regressor'].append(get_results(svr_preds, y_test))
+    model_scores['support_vector_regressor_grid_search'].append(get_results(svr_grid_preds, y_test))
+
+    print(pd.DataFrame.from_dict(model_scores, orient='index', columns=["rmse", "std_dev", "test_rmse"]))
+
+    ensemble_preds = np.mean([xgboost_grid_preds, linreg_preds.ravel(), ridge_preds.ravel(), lasso_preds, svr_preds], axis=0)
+    print('Ensemble results on test set:')
     get_results(ensemble_preds, y_test)
 
     print(f'Model Predicted Scores vs Actual Scores for Players Previous Tournaments:')
@@ -424,12 +477,12 @@ def main():
         print(f'Predicted Score: {int(a)}, Actual Score: {int(*b,)}')
 
     # Predict
-    final_xgboost_preds = np.array(xgboost_model.predict(final_pred_df))
+    final_xgboost_grid_preds = np.array(xgboost_model_grid.predict(final_pred_df))
     final_linreg_preds = np.array(linreg_model.predict(final_pred_df))
     final_ridge_preds = np.array(ridge_model.predict(final_pred_df))
     final_lasso_preds = np.array(lasso_model.predict(final_pred_df))
     final_svr_preds = np.array(svr_model.predict(final_pred_df))
-    final_ensemble_preds = np.mean([final_xgboost_preds, final_linreg_preds.ravel(), final_ridge_preds.ravel(), final_lasso_preds, final_svr_preds], axis=0)
+    final_ensemble_preds = np.mean([final_xgboost_grid_preds, final_linreg_preds.ravel(), final_ridge_preds.ravel(), final_lasso_preds, final_svr_preds], axis=0)
 
     print(f'Final predictions for next tournament:\n')
     print(pd.DataFrame({'full_name': pred_df['full_name'].values, 'projected_score': final_ensemble_preds}).sort_values(by='projected_score'))
