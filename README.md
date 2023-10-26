@@ -29,7 +29,10 @@ Important Notes:
     The only way to avoid this data leakage is to use very old data for each player, or use a paid API to get more granular data (see next bullet).
 - The https://datagolf.com/raw-data-archive API has much more granular strokes gained data. This is paid subscription and requires scratch plus ($30/month). This
     should get rid of data leakage and make the model better by including player data from the past few months, instead of the entire season. I'm hoping to experiment
-    with this API at some point.
+    with this API at some point. NOTE: instead of paying the $30 every month, I could use it for one month to generate a model trained on strokes-gained stats from
+    the few months before each tournament, and keep the model artifact. Then use that model artifact to predict each player's score after ending the subscription
+    by using current season strokes-gained data. This is because once I end the subscription, I will only have this season data, not the past few months. Also, I
+    can train this model on a lot more player data so it's more accurate.
 - I tried incorporating more player-specific features such as past performance on harder courses, windier conditions, and rain. However, I didn't find a good way to 
     meaningfully calculate this, since their scores in these conditions had so many other factors attributing to them, which ended up being very noisy. The code to
     calculate these features is still in the notebook.
